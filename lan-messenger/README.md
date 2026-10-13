@@ -2,6 +2,43 @@
 
 A real-time desktop chat application for local area networks built with Java, JavaFX, and MySQL.
 
+## ⚡ Quick Start (For Windows)
+
+### Prerequisites
+- JDK 21 installed
+- Maven installed  
+- MySQL Server installed and running
+
+### Setup Steps
+
+1. **Create the database:**
+```bash
+mysql -u root -p < database/schema.sql
+```
+
+2. **Configure the application:**
+Edit `src/main/resources/config.properties` and set your MySQL password:
+```properties
+db.password=your_mysql_root_password
+```
+
+3. **Build the project:**
+```bash
+mvn clean install
+```
+
+4. **Start the server:**
+```bash
+mvn exec:java@server
+```
+
+5. **Start clients** (in separate terminals):
+```bash
+mvn exec:java@client
+```
+
+That's it! Register a user, login, and start chatting!
+
 ## Overview
 
 LAN Messenger allows multiple users connected to the same Wi-Fi network or LAN to communicate in real-time. The application features user authentication, private messaging, group chats, file sharing, and persistent chat history.
