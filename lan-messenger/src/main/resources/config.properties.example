@@ -16,7 +16,7 @@ db.username=lanmessenger
 
 # Database password
 # Use a strong password in production
-db.password=your_secure_password_here
+db.password=Piyush#1
 
 # Connection pool settings (future enhancement with HikariCP)
 db.pool.minSize=5
