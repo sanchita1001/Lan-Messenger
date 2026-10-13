@@ -1,0 +1,120 @@
+# LAN Messenger Configuration Template
+# Copy this file to config.properties and update with your settings
+# DO NOT commit config.properties to version control (it's in .gitignore)
+
+# =============================================================================
+# Database Configuration
+# =============================================================================
+
+# MySQL JDBC connection URL
+# Format: jdbc:mysql://hostname:port/database_name?parameters
+db.url=jdbc:mysql://localhost:3306/lan_messenger?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+
+# Database username
+# For production, create a dedicated user with limited privileges
+db.username=lanmessenger
+
+# Database password
+# Use a strong password in production
+db.password=your_secure_password_here
+
+# Connection pool settings (future enhancement with HikariCP)
+db.pool.minSize=5
+db.pool.maxSize=20
+db.pool.timeout=30000
+
+# =============================================================================
+# Server Configuration
+# =============================================================================
+
+# Port number for the TCP server
+# Must be between 1024-65535 (avoid privileged ports 0-1023)
+# Ensure this port is allowed through firewall
+server.port=5000
+
+# Server host address for clients to connect
+# Use 0.0.0.0 to listen on all network interfaces
+# Or specific IP like 192.168.1.100 for LAN only
+server.host=0.0.0.0
+
+# Maximum number of concurrent client connections
+server.max.clients=100
+
+# Client connection timeout in milliseconds
+# Close connection if no heartbeat received within this time
+server.client.timeout=300000
+
+# =============================================================================
+# File Transfer Configuration
+# =============================================================================
+
+# Directory where uploaded files will be stored
+# Path relative to application root or absolute path
+file.upload.dir=uploads
+
+# Maximum file size in bytes
+# Default: 52428800 bytes = 50 MB
+# Adjust based on your network and storage capacity
+file.max.size=52428800
+
+# Allowed file extensions (comma-separated, no spaces)
+# Empty means all extensions allowed (not recommended for security)
+file.allowed.extensions=.pdf,.doc,.docx,.txt,.jpg,.jpeg,.png,.gif,.zip,.rar
+
+# =============================================================================
+# Security Configuration
+# =============================================================================
+
+# BCrypt password hashing work factor
+# Higher = more secure but slower
+# Recommended: 10-12 for production
+security.bcrypt.rounds=12
+
+# Session timeout in milliseconds
+# Clients idle longer than this will be disconnected
+security.session.timeout=1800000
+
+# =============================================================================
+# Logging Configuration
+# =============================================================================
+
+# Log level: TRACE, DEBUG, INFO, WARN, ERROR
+log.level=INFO
+
+# Log file path
+log.file=logs/lanmessenger.log
+
+# =============================================================================
+# Client Configuration (Optional)
+# =============================================================================
+
+# Default server address for client to connect
+# Can be overridden in client UI
+client.default.server.host=localhost
+client.default.server.port=5000
+
+# Auto-reconnect settings
+client.auto.reconnect=true
+client.reconnect.delay=5000
+client.reconnect.max.attempts=5
+
+# =============================================================================
+# Feature Flags (Future Enhancements)
+# =============================================================================
+
+# Enable/disable features
+feature.file.transfer=true
+feature.group.chat=true
+feature.message.search=true
+feature.typing.indicator=false
+feature.read.receipts=false
+
+# =============================================================================
+# Development Settings
+# =============================================================================
+
+# Enable debug mode (verbose logging, stack traces)
+dev.debug.mode=false
+
+# Enable SQL query logging
+dev.log.sql=false
