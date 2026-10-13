@@ -306,17 +306,35 @@ public class ClientApp extends Application {
 
         centerBox.getChildren().addAll(conversationTitleLabel, chatArea, inputBox);
 
-        // Bottom status bar
+        // Bottom status bar with logout button
+        HBox statusBar = new HBox(10);
+        statusBar.setStyle("-fx-padding: 5; -fx-background-color: #34495e;");
+        statusBar.setAlignment(Pos.CENTER_LEFT);
+        
         statusLabel = new Label("Logged in as: " + username);
-        statusLabel.setStyle("-fx-padding: 5; -fx-background-color: #34495e; -fx-text-fill: white;");
+        statusLabel.setStyle("-fx-text-fill: white;");
+        HBox.setHgrow(statusLabel, Priority.ALWAYS);
+        
+        Button logoutButton = new Button("Logout");
+        logoutButton.setStyle("-fx-background-color: #e74c3c; -fx-text-fill: white;");
+        logoutButton.setOnAction(e -> logout());
+        
+        statusBar.getChildren().addAll(statusLabel, logoutButton);
 
         root.setLeft(sidebar);
         root.setCenter(centerBox);
-        root.setBottom(statusLabel);
+        root.setBottom(statusBar);
 
         Scene scene = new Scene(root, 800, 600);
         primaryStage.setScene(scene);
         primaryStage.setTitle("LAN Messenger - " + username);
+        
+        // Handle window close event
+        primaryStage.setOnCloseRequest(e -> {
+            if (serverConnection != null && serverConnection.isConnected()) {
+                serverConnection.disconnect();
+            }
+        });
     }
 
     /**
@@ -431,6 +449,34 @@ public class ClientApp extends Application {
         serverConnection.sendMessage(msg);
 
         messageField.clear();
+    }
+
+    /**
+     * Logout and return to login screen
+     */
+    private void logout() {
+        Alert confirmation = new Alert(Alert.AlertType.CONFIRMATION);
+        confirmation.setTitle("Logout");
+        confirmation.setHeaderText("Are you sure you want to logout?");
+        confirmation.setContentText("You will be disconnected from the server.");
+        
+        confirmation.showAndWait().ifPresent(response -> {
+            if (response == ButtonType.OK) {
+                // Disconnect from server
+                if (serverConnection != null) {
+                    serverConnection.disconnect();
+                    serverConnection = null;
+                }
+                
+                // Reset session
+                userId = null;
+                username = null;
+                currentConversationId = null;
+                
+                // Show login screen
+                showLoginScreen();
+            }
+        });
     }
 
     @Override
