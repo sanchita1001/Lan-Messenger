@@ -17,6 +17,7 @@ public class Message {
     public static final String LIST_CONVERSATIONS = "LIST_CONVERSATIONS";
     public static final String LIST_ONLINE_USERS = "LIST_ONLINE_USERS";
     public static final String SEND_FILE = "SEND_FILE";
+    public static final String REQUEST_FILE = "REQUEST_FILE";
     public static final String HEARTBEAT = "HEARTBEAT";
     public static final String LOGOUT = "LOGOUT";
     
@@ -30,6 +31,7 @@ public class Message {
     public static final String ONLINE_USERS_LIST = "ONLINE_USERS_LIST";
     public static final String USER_STATUS = "USER_STATUS";
     public static final String FILE_TRANSFER = "FILE_TRANSFER";
+    public static final String FILE_DATA = "FILE_DATA";
     public static final String ERROR = "ERROR";
     public static final String REGISTER_SUCCESS = "REGISTER_SUCCESS";
     public static final String REGISTER_FAILURE = "REGISTER_FAILURE";

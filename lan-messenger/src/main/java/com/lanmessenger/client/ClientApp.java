@@ -305,6 +305,39 @@ public class ClientApp extends Application {
             case Message.FILE_TRANSFER:
                 Platform.runLater(() -> handleIncomingFile(message));
                 break;
+                
+            case Message.FILE_DATA:
+                Platform.runLater(() -> handleFileData(message));
+                break;
+        }
+    }
+    
+    /**
+     * Handle file data response (download)
+     */
+    private void handleFileData(Message message) {
+        try {
+            String filename = message.getString("filename");
+            String base64Data = message.getString("fileData");
+            long fileSize = message.getLong("fileSize");
+            
+            FileChooser fileChooser = new FileChooser();
+            fileChooser.setTitle("Save File");
+            fileChooser.setInitialFileName(filename);
+            
+            File saveFile = fileChooser.showSaveDialog(primaryStage);
+            if (saveFile == null) {
+                return; // User cancelled
+            }
+            
+            byte[] fileData = Base64.getDecoder().decode(base64Data);
+            Files.write(saveFile.toPath(), fileData);
+            
+            showAlert("Success", String.format("File saved successfully!\n%s (%.2f KB)", 
+                filename, fileSize / 1024.0));
+            
+        } catch (Exception e) {
+            showAlert("Save Error", "Failed to save file: " + e.getMessage());
         }
     }
     
@@ -316,30 +349,41 @@ public class ClientApp extends Application {
         
         // Only display if it's for the current conversation
         if (currentConversationId != null && currentConversationId == convId) {
+            int senderId = message.getInt("senderId");
             String sender = message.getString("senderName");
             String filename = message.getString("filename");
             long fileSize = message.getLong("fileSize");
+            int fileId = message.getInt("fileId");
+            String timestamp = message.getString("timestamp");
             
-            chatArea.appendText(String.format("[FILE] %s sent: %s (%.2f KB)\n", 
-                sender, filename, fileSize / 1024.0));
+            // Display file message in chat for both sender and receiver
+            String formattedTime = formatTimestamp(timestamp);
+            chatArea.appendText(String.format("[%s] %s sent a file:\n", formattedTime, sender));
+            chatArea.appendText(String.format("    📎 %s (%.2f KB)\n", filename, fileSize / 1024.0));
+            chatArea.appendText(String.format("    To download: Type '/download %d' in the message field\n\n", fileId));
             
-            // Show download option
-            Alert downloadAlert = new Alert(Alert.AlertType.CONFIRMATION);
-            downloadAlert.setTitle("File Received");
-            downloadAlert.setHeaderText("File from " + sender);
-            downloadAlert.setContentText(String.format("%s (%.2f KB)\n\nDo you want to save this file?", 
-                filename, fileSize / 1024.0));
-            
-            downloadAlert.showAndWait().ifPresent(response -> {
-                if (response == ButtonType.OK) {
-                    saveReceivedFile(message);
-                }
-            });
+            // Only auto-download if this user is NOT the sender
+            if (senderId != this.userId) {
+                downloadFile(fileId);
+            } else {
+                statusLabel.setText("File sent successfully!");
+            }
         }
     }
     
     /**
-     * Save received file to disk
+     * Download a file from server
+     */
+    private void downloadFile(int fileId) {
+        Message request = new Message(Message.REQUEST_FILE);
+        request.put("fileId", fileId);
+        serverConnection.sendMessage(request);
+        
+        statusLabel.setText("Downloading file...");
+    }
+    
+    /**
+     * Save received file to disk (deprecated - now uses downloadFile)
      */
     private void saveReceivedFile(Message message) {
         try {
@@ -687,7 +731,7 @@ public class ClientApp extends Application {
         currentConversationId = Integer.parseInt(parts[0].trim());
         String name = parts.length > 1 ? parts[1].trim() : "Chat";
         
-        conversationTitleLabel.setText(name);
+        conversationTitleLabel.setText(name + " (Conversation ID: " + currentConversationId + ")");
         chatArea.clear();
         messageField.setDisable(false);
         
@@ -702,6 +746,8 @@ public class ClientApp extends Application {
         // Load history
         Message loadHistoryMsg = Message.loadHistoryRequest(currentConversationId, 50, 0);
         serverConnection.sendMessage(loadHistoryMsg);
+        
+        statusLabel.setText("💡 Tip: To download a file, type '/download <fileId>' in the message box");
     }
     
     /**
@@ -759,8 +805,7 @@ public class ClientApp extends Application {
                 
                 Platform.runLater(() -> {
                     progressAlert.close();
-                    chatArea.appendText(String.format("[FILE] You sent: %s (%.2f KB)\n", 
-                        selectedFile.getName(), selectedFile.length() / 1024.0));
+                    statusLabel.setText("File uploaded successfully. Waiting for confirmation...");
                 });
                 
             } catch (IOException e) {
@@ -792,12 +837,16 @@ public class ClientApp extends Application {
         
         for (int i = 0; i < messages.length(); i++) {
             JSONObject msg = messages.getJSONObject(i);
+            int messageId = msg.getInt("messageId");
             String sender = msg.getString("senderName");
             String text = msg.getString("text");
             String timestamp = msg.getString("timestamp");
             
             appendMessage(sender, text, timestamp);
         }
+        
+        // Note: File metadata is stored separately and needs to be loaded from database
+        // For now, file messages show as text with [File: filename] format
     }
 
     /**
@@ -847,6 +896,21 @@ public class ClientApp extends Application {
         String text = messageField.getText().trim();
         if (text.isEmpty()) {
             return;
+        }
+        
+        // Check for special commands
+        if (text.startsWith("/download ")) {
+            try {
+                String fileIdStr = text.substring(10).trim();
+                int fileId = Integer.parseInt(fileIdStr);
+                downloadFile(fileId);
+                messageField.clear();
+                return;
+            } catch (Exception e) {
+                showAlert("Invalid Command", "Usage: /download <fileId>\nExample: /download 123");
+                messageField.clear();
+                return;
+            }
         }
 
         Message msg = Message.sendMessageRequest(currentConversationId, text);

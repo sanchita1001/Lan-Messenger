@@ -94,6 +94,9 @@ public class ClientHandler implements Runnable {
                 case Message.SEND_FILE:
                     handleSendFile(message);
                     break;
+                case Message.REQUEST_FILE:
+                    handleRequestFile(message);
+                    break;
                 default:
                     sendError("Unknown message type: " + type);
             }
@@ -126,22 +129,41 @@ public class ClientHandler implements Runnable {
 
         System.out.println("[ClientHandler] File transfer: " + filename + " (" + fileSize + " bytes) to conversation " + conversationId);
 
-        // Create a file transfer message (without full data to save bandwidth on broadcast)
+        // Create a file message in database
         ChatMessage fileMessage = messageService.sendMessage(conversationId, authenticatedUserId, 
             "[File: " + filename + "]");
 
         if (fileMessage != null) {
-            // Broadcast file transfer notification to conversation members
-            broadcastFileTransfer(conversationId, fileMessage.getMessageId(), filename, fileSize, fileData);
+            // Save file to disk using FileService
+            try {
+                byte[] fileBytes = java.util.Base64.getDecoder().decode(fileData);
+                com.lanmessenger.services.FileService fileService = new com.lanmessenger.services.FileService();
+                com.lanmessenger.models.FileMetadata metadata = fileService.saveFile(
+                    fileMessage.getMessageId(), 
+                    filename, 
+                    fileBytes
+                );
+                
+                if (metadata != null) {
+                    System.out.println("[ClientHandler] File saved: " + metadata.getStoragePath());
+                    // Broadcast file transfer notification to conversation members
+                    broadcastFileTransfer(conversationId, fileMessage.getMessageId(), filename, fileSize, metadata.getFileId());
+                } else {
+                    sendError("Failed to save file");
+                }
+            } catch (Exception e) {
+                System.err.println("[ClientHandler] Error saving file: " + e.getMessage());
+                sendError("Failed to save file: " + e.getMessage());
+            }
         } else {
             sendError("Failed to send file");
         }
     }
     
     /**
-     * Broadcast file transfer to conversation members
+     * Broadcast file transfer to conversation members (without full file data)
      */
-    private void broadcastFileTransfer(int conversationId, int messageId, String filename, long fileSize, String fileData) {
+    private void broadcastFileTransfer(int conversationId, int messageId, String filename, long fileSize, int fileId) {
         List<User> members = messageService.getConversationMembers(conversationId);
 
         Message broadcast = new Message(Message.FILE_TRANSFER);
@@ -151,12 +173,12 @@ public class ClientHandler implements Runnable {
         broadcast.put("senderName", authenticatedUsername);
         broadcast.put("filename", filename);
         broadcast.put("fileSize", fileSize);
-        broadcast.put("fileData", fileData);
+        broadcast.put("fileId", fileId);
         broadcast.put("timestamp", new java.sql.Timestamp(System.currentTimeMillis()).toString());
 
         for (User member : members) {
             ClientHandler handler = userRegistry.getClientHandler(member.getUserId());
-            if (handler != null && handler.getAuthenticatedUserId() != authenticatedUserId) {
+            if (handler != null) {
                 handler.sendMessage(broadcast);
             }
         }
@@ -362,11 +384,18 @@ public class ClientHandler implements Runnable {
                 System.out.println("[ClientHandler] Private conversation created/found: " + existingConvId + 
                     " between users " + authenticatedUserId + " and " + targetUserId);
                 
-                // Send success response
-                Message response = new Message("CONVERSATION_CREATED");
-                response.put("conversationId", existingConvId);
-                response.put("conversationType", "PRIVATE");
-                sendMessage(response);
+                // Broadcast CONVERSATION_CREATED to ALL members (not just creator)
+                List<User> members = messageService.getConversationMembers(existingConvId);
+                
+                for (User member : members) {
+                    ClientHandler handler = userRegistry.getClientHandler(member.getUserId());
+                    if (handler != null) {
+                        Message response = new Message("CONVERSATION_CREATED");
+                        response.put("conversationId", existingConvId);
+                        response.put("conversationType", "PRIVATE");
+                        handler.sendMessage(response);
+                    }
+                }
             } else {
                 sendError("Failed to create conversation");
             }
@@ -415,6 +444,52 @@ public class ClientHandler implements Runnable {
             if (handler != null) {
                 handler.sendMessage(broadcast);
             }
+        }
+    }
+    
+    /**
+     * Handle file download request
+     */
+    private void handleRequestFile(Message message) {
+        if (!isAuthenticated()) {
+            sendError("Not authenticated");
+            return;
+        }
+
+        int fileId = message.getInt("fileId");
+        
+        try {
+            com.lanmessenger.services.FileService fileService = new com.lanmessenger.services.FileService();
+            com.lanmessenger.models.FileMetadata metadata = fileService.getFileMetadata(fileId);
+            
+            if (metadata == null) {
+                sendError("File not found");
+                return;
+            }
+            
+            // Read file from disk
+            byte[] fileData = fileService.readFile(metadata.getStoragePath());
+            
+            if (fileData == null) {
+                sendError("File not found on server");
+                return;
+            }
+            
+            // Send file data to client
+            String base64Data = java.util.Base64.getEncoder().encodeToString(fileData);
+            
+            Message response = new Message(Message.FILE_DATA);
+            response.put("fileId", fileId);
+            response.put("filename", metadata.getOriginalFilename());
+            response.put("fileSize", metadata.getFileSize());
+            response.put("fileData", base64Data);
+            
+            sendMessage(response);
+            System.out.println("[ClientHandler] File sent to user " + authenticatedUserId + ": " + metadata.getOriginalFilename());
+            
+        } catch (Exception e) {
+            System.err.println("[ClientHandler] Error sending file: " + e.getMessage());
+            sendError("Failed to send file: " + e.getMessage());
         }
     }
 
