@@ -24,6 +24,35 @@ public class ServerApp {
         // Load configuration
         ConfigUtil.loadConfig();
         int port = ConfigUtil.getServerPort();
+        
+        // Display server IP addresses
+        System.out.println("[SERVER] Server IP Addresses:");
+        try {
+            java.net.InetAddress localHost = java.net.InetAddress.getLocalHost();
+            System.out.println("[SERVER]   - Hostname: " + localHost.getHostName());
+            System.out.println("[SERVER]   - IP Address: " + localHost.getHostAddress());
+            
+            // Show all network interfaces
+            java.util.Enumeration<java.net.NetworkInterface> interfaces = 
+                java.net.NetworkInterface.getNetworkInterfaces();
+            
+            while (interfaces.hasMoreElements()) {
+                java.net.NetworkInterface networkInterface = interfaces.nextElement();
+                if (networkInterface.isUp() && !networkInterface.isLoopback()) {
+                    java.util.Enumeration<java.net.InetAddress> addresses = 
+                        networkInterface.getInetAddresses();
+                    while (addresses.hasMoreElements()) {
+                        java.net.InetAddress addr = addresses.nextElement();
+                        if (addr instanceof java.net.Inet4Address) {
+                            System.out.println("[SERVER]   - " + networkInterface.getDisplayName() + 
+                                ": " + addr.getHostAddress());
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("[SERVER] Could not determine IP address: " + e.getMessage());
+        }
 
         // Test database connection
         System.out.println("[SERVER] Testing database connection...");
@@ -39,6 +68,7 @@ public class ServerApp {
         try {
             serverSocket = new ServerSocket(port);
             System.out.println("[SERVER] Server listening on port " + port);
+            System.out.println("[SERVER] Clients should connect to: <your-ip>:" + port);
             System.out.println("[SERVER] Waiting for client connections...");
             System.out.println("[SERVER] Press Ctrl+C to shutdown");
             System.out.println("===========================================\n");

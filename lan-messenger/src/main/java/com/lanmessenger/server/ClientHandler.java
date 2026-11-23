@@ -79,11 +79,20 @@ public class ClientHandler implements Runnable {
                 case Message.LIST_CONVERSATIONS:
                     handleListConversations();
                     break;
+                case Message.LIST_ONLINE_USERS:
+                    handleListOnlineUsers();
+                    break;
+                case Message.CREATE_CONVERSATION:
+                    handleCreateConversation(message);
+                    break;
                 case Message.HEARTBEAT:
                     handleHeartbeat(message);
                     break;
                 case Message.LOGOUT:
                     handleLogout();
+                    break;
+                case Message.SEND_FILE:
+                    handleSendFile(message);
                     break;
                 default:
                     sendError("Unknown message type: " + type);
@@ -92,6 +101,64 @@ public class ClientHandler implements Runnable {
             System.err.println("[ClientHandler] Error handling message: " + e.getMessage());
             e.printStackTrace();
             sendError("Server error processing request");
+        }
+    }
+    
+    /**
+     * Handle file send request
+     */
+    private void handleSendFile(Message message) {
+        if (!isAuthenticated()) {
+            sendError("Not authenticated");
+            return;
+        }
+
+        int conversationId = message.getInt("conversationId");
+        String filename = message.getString("filename");
+        long fileSize = message.getLong("fileSize");
+        String fileData = message.getString("fileData");
+
+        // Check authorization
+        if (!messageService.isUserMemberOfConversation(authenticatedUserId, conversationId)) {
+            sendError("Not authorized to send files to this conversation");
+            return;
+        }
+
+        System.out.println("[ClientHandler] File transfer: " + filename + " (" + fileSize + " bytes) to conversation " + conversationId);
+
+        // Create a file transfer message (without full data to save bandwidth on broadcast)
+        ChatMessage fileMessage = messageService.sendMessage(conversationId, authenticatedUserId, 
+            "[File: " + filename + "]");
+
+        if (fileMessage != null) {
+            // Broadcast file transfer notification to conversation members
+            broadcastFileTransfer(conversationId, fileMessage.getMessageId(), filename, fileSize, fileData);
+        } else {
+            sendError("Failed to send file");
+        }
+    }
+    
+    /**
+     * Broadcast file transfer to conversation members
+     */
+    private void broadcastFileTransfer(int conversationId, int messageId, String filename, long fileSize, String fileData) {
+        List<User> members = messageService.getConversationMembers(conversationId);
+
+        Message broadcast = new Message(Message.FILE_TRANSFER);
+        broadcast.put("messageId", messageId);
+        broadcast.put("conversationId", conversationId);
+        broadcast.put("senderId", authenticatedUserId);
+        broadcast.put("senderName", authenticatedUsername);
+        broadcast.put("filename", filename);
+        broadcast.put("fileSize", fileSize);
+        broadcast.put("fileData", fileData);
+        broadcast.put("timestamp", new java.sql.Timestamp(System.currentTimeMillis()).toString());
+
+        for (User member : members) {
+            ClientHandler handler = userRegistry.getClientHandler(member.getUserId());
+            if (handler != null && handler.getAuthenticatedUserId() != authenticatedUserId) {
+                handler.sendMessage(broadcast);
+            }
         }
     }
 
@@ -241,6 +308,71 @@ public class ClientHandler implements Runnable {
 
         response.put("conversations", conversationsArray);
         sendMessage(response);
+    }
+    
+    /**
+     * Handle list online users request
+     */
+    private void handleListOnlineUsers() {
+        if (!isAuthenticated()) {
+            sendError("Not authenticated");
+            return;
+        }
+
+        List<Integer> onlineUserIds = userRegistry.getOnlineUserIds();
+        
+        Message response = new Message(Message.ONLINE_USERS_LIST);
+        JSONArray usersArray = new JSONArray();
+
+        for (Integer userId : onlineUserIds) {
+            if (userId != authenticatedUserId) { // Don't include the requesting user
+                ClientHandler handler = userRegistry.getClientHandler(userId);
+                if (handler != null && handler.authenticatedUsername != null) {
+                    JSONObject userObj = new JSONObject();
+                    userObj.put("userId", userId);
+                    userObj.put("username", handler.authenticatedUsername);
+                    userObj.put("online", true);
+                    usersArray.put(userObj);
+                }
+            }
+        }
+
+        response.put("users", usersArray);
+        sendMessage(response);
+    }
+    
+    /**
+     * Handle create conversation request
+     */
+    private void handleCreateConversation(Message message) {
+        if (!isAuthenticated()) {
+            sendError("Not authenticated");
+            return;
+        }
+
+        String convType = message.getString("conversationType");
+        
+        if ("PRIVATE".equalsIgnoreCase(convType)) {
+            int targetUserId = message.getInt("targetUserId");
+            
+            // Check if conversation already exists or create new one
+            Integer existingConvId = messageService.createOrGetPrivateConversation(authenticatedUserId, targetUserId);
+            
+            if (existingConvId > 0) {
+                System.out.println("[ClientHandler] Private conversation created/found: " + existingConvId + 
+                    " between users " + authenticatedUserId + " and " + targetUserId);
+                
+                // Send success response
+                Message response = new Message("CONVERSATION_CREATED");
+                response.put("conversationId", existingConvId);
+                response.put("conversationType", "PRIVATE");
+                sendMessage(response);
+            } else {
+                sendError("Failed to create conversation");
+            }
+        } else {
+            sendError("Unsupported conversation type: " + convType);
+        }
     }
 
     /**

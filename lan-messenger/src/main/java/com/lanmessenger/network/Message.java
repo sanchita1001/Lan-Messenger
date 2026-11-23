@@ -15,6 +15,7 @@ public class Message {
     public static final String LOAD_HISTORY = "LOAD_HISTORY";
     public static final String CREATE_CONVERSATION = "CREATE_CONVERSATION";
     public static final String LIST_CONVERSATIONS = "LIST_CONVERSATIONS";
+    public static final String LIST_ONLINE_USERS = "LIST_ONLINE_USERS";
     public static final String SEND_FILE = "SEND_FILE";
     public static final String HEARTBEAT = "HEARTBEAT";
     public static final String LOGOUT = "LOGOUT";
@@ -25,6 +26,8 @@ public class Message {
     public static final String NEW_MESSAGE = "NEW_MESSAGE";
     public static final String HISTORY_RESPONSE = "HISTORY_RESPONSE";
     public static final String CONVERSATION_LIST = "CONVERSATION_LIST";
+    public static final String CONVERSATION_CREATED = "CONVERSATION_CREATED";
+    public static final String ONLINE_USERS_LIST = "ONLINE_USERS_LIST";
     public static final String USER_STATUS = "USER_STATUS";
     public static final String FILE_TRANSFER = "FILE_TRANSFER";
     public static final String ERROR = "ERROR";
@@ -153,6 +156,10 @@ public class Message {
 
     public static Message listConversationsRequest() {
         return new Message(LIST_CONVERSATIONS);
+    }
+    
+    public static Message listOnlineUsersRequest() {
+        return new Message(LIST_ONLINE_USERS);
     }
 
     public static Message authSuccess(int userId, String username) {

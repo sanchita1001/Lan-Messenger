@@ -9,12 +9,15 @@ import javafx.geometry.Pos;
 import javafx.scene.Scene;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
+import javafx.stage.FileChooser;
 import javafx.stage.Stage;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
+import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.util.Base64;
 
 /**
  * Simple JavaFX Client Application
@@ -35,6 +38,8 @@ public class ClientApp extends Application {
     private ListView<String> conversationListView;
     private Label statusLabel;
     private Label conversationTitleLabel;
+    private ListView<String> onlineUsersListView; // For showing online users
+    private JSONArray cachedOnlineUsers; // Cache online users data
 
     @Override
     public void start(Stage primaryStage) {
@@ -59,6 +64,25 @@ public class ClientApp extends Application {
 
         Label titleLabel = new Label("LAN Messenger");
         titleLabel.setStyle("-fx-font-size: 32px; -fx-font-weight: bold; -fx-text-fill: white;");
+        
+        // Server configuration section
+        HBox serverConfigBox = new HBox(10);
+        serverConfigBox.setAlignment(Pos.CENTER);
+        
+        TextField serverHostField = new TextField(ConfigUtil.getServerHost());
+        serverHostField.setPromptText("Server IP");
+        serverHostField.setPrefWidth(200);
+        
+        TextField serverPortField = new TextField(String.valueOf(ConfigUtil.getServerPort()));
+        serverPortField.setPromptText("Port");
+        serverPortField.setPrefWidth(80);
+        
+        serverConfigBox.getChildren().addAll(
+            new Label("Server:") {{setStyle("-fx-text-fill: white;");}},
+            serverHostField,
+            new Label("Port:") {{setStyle("-fx-text-fill: white;");}},
+            serverPortField
+        );
 
         TextField usernameField = new TextField();
         usernameField.setPromptText("Username");
@@ -82,34 +106,64 @@ public class ClientApp extends Application {
         HBox buttonBox = new HBox(10, loginButton, registerButton);
         buttonBox.setAlignment(Pos.CENTER);
 
-        root.getChildren().addAll(titleLabel, usernameField, passwordField, errorLabel, buttonBox);
+        root.getChildren().addAll(titleLabel, serverConfigBox, usernameField, passwordField, errorLabel, buttonBox);
 
         // Login action
         loginButton.setOnAction(e -> {
             String user = usernameField.getText().trim();
             String pass = passwordField.getText();
+            String host = serverHostField.getText().trim();
+            String portStr = serverPortField.getText().trim();
             
             if (user.isEmpty() || pass.isEmpty()) {
                 errorLabel.setText("Please enter username and password");
                 return;
             }
+            
+            if (host.isEmpty()) {
+                errorLabel.setText("Please enter server IP address");
+                return;
+            }
+            
+            int port;
+            try {
+                port = Integer.parseInt(portStr);
+            } catch (NumberFormatException ex) {
+                errorLabel.setText("Invalid port number");
+                return;
+            }
 
-            errorLabel.setText("Connecting...");
-            new Thread(() -> login(user, pass, errorLabel)).start();
+            errorLabel.setText("Connecting to " + host + ":" + port + "...");
+            new Thread(() -> login(user, pass, host, port, errorLabel)).start();
         });
 
         // Register action
         registerButton.setOnAction(e -> {
             String user = usernameField.getText().trim();
             String pass = passwordField.getText();
+            String host = serverHostField.getText().trim();
+            String portStr = serverPortField.getText().trim();
             
             if (user.isEmpty() || pass.isEmpty()) {
                 errorLabel.setText("Please enter username and password");
                 return;
             }
+            
+            if (host.isEmpty()) {
+                errorLabel.setText("Please enter server IP address");
+                return;
+            }
+            
+            int port;
+            try {
+                port = Integer.parseInt(portStr);
+            } catch (NumberFormatException ex) {
+                errorLabel.setText("Invalid port number");
+                return;
+            }
 
-            errorLabel.setText("Connecting...");
-            new Thread(() -> register(user, pass, errorLabel)).start();
+            errorLabel.setText("Connecting to " + host + ":" + port + "...");
+            new Thread(() -> register(user, pass, host, port, errorLabel)).start();
         });
 
         // Enter key login
@@ -123,14 +177,10 @@ public class ClientApp extends Application {
     /**
      * Attempt to register
      */
-    private void register(String username, String password, Label errorLabel) {
-        // Connect to server
-        String host = ConfigUtil.getServerHost();
-        int port = ConfigUtil.getServerPort();
-        
+    private void register(String username, String password, String host, int port, Label errorLabel) {
         serverConnection = new ServerConnection(host, port);
         if (!serverConnection.connect()) {
-            Platform.runLater(() -> errorLabel.setText("Cannot connect to server"));
+            Platform.runLater(() -> errorLabel.setText("Cannot connect to server at " + host + ":" + port));
             return;
         }
 
@@ -160,11 +210,7 @@ public class ClientApp extends Application {
     /**
      * Attempt to login
      */
-    private void login(String username, String password, Label errorLabel) {
-        // Connect to server
-        String host = ConfigUtil.getServerHost();
-        int port = ConfigUtil.getServerPort();
-        
+    private void login(String username, String password, String host, int port, Label errorLabel) {
         serverConnection = new ServerConnection(host, port);
         if (!serverConnection.connect()) {
             Platform.runLater(() -> errorLabel.setText("Cannot connect to server at " + host + ":" + port));
@@ -219,6 +265,17 @@ public class ClientApp extends Application {
             case Message.CONVERSATION_LIST:
                 Platform.runLater(() -> updateConversationList(message));
                 break;
+                
+            case Message.CONVERSATION_CREATED:
+                Platform.runLater(() -> {
+                    // Refresh conversation list to show new conversation
+                    requestConversationList();
+                });
+                break;
+                
+            case Message.ONLINE_USERS_LIST:
+                Platform.runLater(() -> handleOnlineUsersList(message));
+                break;
 
             case Message.HISTORY_RESPONSE:
                 Platform.runLater(() -> displayHistory(message));
@@ -244,6 +301,67 @@ public class ClientApp extends Application {
                     alert.show();
                 });
                 break;
+                
+            case Message.FILE_TRANSFER:
+                Platform.runLater(() -> handleIncomingFile(message));
+                break;
+        }
+    }
+    
+    /**
+     * Handle incoming file transfer notification
+     */
+    private void handleIncomingFile(Message message) {
+        int convId = message.getInt("conversationId");
+        
+        // Only display if it's for the current conversation
+        if (currentConversationId != null && currentConversationId == convId) {
+            String sender = message.getString("senderName");
+            String filename = message.getString("filename");
+            long fileSize = message.getLong("fileSize");
+            
+            chatArea.appendText(String.format("[FILE] %s sent: %s (%.2f KB)\n", 
+                sender, filename, fileSize / 1024.0));
+            
+            // Show download option
+            Alert downloadAlert = new Alert(Alert.AlertType.CONFIRMATION);
+            downloadAlert.setTitle("File Received");
+            downloadAlert.setHeaderText("File from " + sender);
+            downloadAlert.setContentText(String.format("%s (%.2f KB)\n\nDo you want to save this file?", 
+                filename, fileSize / 1024.0));
+            
+            downloadAlert.showAndWait().ifPresent(response -> {
+                if (response == ButtonType.OK) {
+                    saveReceivedFile(message);
+                }
+            });
+        }
+    }
+    
+    /**
+     * Save received file to disk
+     */
+    private void saveReceivedFile(Message message) {
+        try {
+            String filename = message.getString("filename");
+            String base64Data = message.getString("fileData");
+            
+            FileChooser fileChooser = new FileChooser();
+            fileChooser.setTitle("Save File");
+            fileChooser.setInitialFileName(filename);
+            
+            File saveFile = fileChooser.showSaveDialog(primaryStage);
+            if (saveFile == null) {
+                return; // User cancelled
+            }
+            
+            byte[] fileData = Base64.getDecoder().decode(base64Data);
+            Files.write(saveFile.toPath(), fileData);
+            
+            showAlert("Success", "File saved successfully!");
+            
+        } catch (Exception e) {
+            showAlert("Save Error", "Failed to save file: " + e.getMessage());
         }
     }
 
@@ -262,6 +380,11 @@ public class ClientApp extends Application {
         Label sidebarTitle = new Label("Conversations");
         sidebarTitle.setStyle("-fx-text-fill: white; -fx-font-size: 16px; -fx-font-weight: bold;");
 
+        Button newChatButton = new Button("+ New Chat");
+        newChatButton.setStyle("-fx-background-color: #27ae60; -fx-text-fill: white; -fx-font-size: 12px;");
+        newChatButton.setMaxWidth(Double.MAX_VALUE);
+        newChatButton.setOnAction(e -> showNewChatDialog());
+
         conversationListView = new ListView<>();
         conversationListView.setStyle("-fx-background-color: #2c3e50; -fx-text-fill: white;");
         conversationListView.setOnMouseClicked(e -> {
@@ -273,7 +396,7 @@ public class ClientApp extends Application {
             }
         });
 
-        sidebar.getChildren().addAll(sidebarTitle, conversationListView);
+        sidebar.getChildren().addAll(sidebarTitle, newChatButton, conversationListView);
         VBox.setVgrow(conversationListView, Priority.ALWAYS);
 
         // Center - chat area
@@ -299,10 +422,15 @@ public class ClientApp extends Application {
         sendButton.setStyle("-fx-background-color: #3498db; -fx-text-fill: white;");
         sendButton.setDisable(true);
         sendButton.setOnAction(e -> sendMessage());
+        
+        Button attachButton = new Button("📎 Attach File");
+        attachButton.setStyle("-fx-background-color: #9b59b6; -fx-text-fill: white;");
+        attachButton.setDisable(true);
+        attachButton.setOnAction(e -> attachAndSendFile());
 
         messageField.setOnAction(e -> sendMessage());
 
-        inputBox.getChildren().addAll(messageField, sendButton);
+        inputBox.getChildren().addAll(messageField, attachButton, sendButton);
 
         centerBox.getChildren().addAll(conversationTitleLabel, chatArea, inputBox);
 
@@ -335,6 +463,197 @@ public class ClientApp extends Application {
                 serverConnection.disconnect();
             }
         });
+    }
+
+    /**
+     * Handle online users list response
+     */
+    private void handleOnlineUsersList(Message message) {
+        cachedOnlineUsers = message.getData().getJSONArray("users");
+        
+        // If the online users dialog is showing, update it
+        if (onlineUsersListView != null) {
+            onlineUsersListView.getItems().clear();
+            for (int i = 0; i < cachedOnlineUsers.length(); i++) {
+                JSONObject user = cachedOnlineUsers.getJSONObject(i);
+                String username = user.getString("username");
+                onlineUsersListView.getItems().add(username);
+            }
+        }
+    }
+    
+    /**
+     * Show dialog to start a new chat with an online user
+     */
+    private void showNewChatDialog() {
+        Dialog<String> dialog = new Dialog<>();
+        dialog.setTitle("New Chat");
+        dialog.setHeaderText("Select an online user to start chatting");
+
+        // Create list view of online users
+        onlineUsersListView = new ListView<>();
+        
+        // Request online users from server
+        serverConnection.sendMessage(Message.listOnlineUsersRequest());
+        
+        // Show loading message
+        onlineUsersListView.getItems().add("Loading online users...");
+        
+        // Wait a moment for the response
+        new Thread(() -> {
+            try {
+                Thread.sleep(500);
+                Platform.runLater(() -> {
+                    if (cachedOnlineUsers == null || cachedOnlineUsers.length() == 0) {
+                        onlineUsersListView.getItems().clear();
+                        onlineUsersListView.getItems().add("No other users online");
+                    }
+                });
+            } catch (InterruptedException e) {
+                // Ignore
+            }
+        }).start();
+
+        VBox content = new VBox(10);
+        content.setPadding(new Insets(10));
+        Label instruction = new Label("Double-click a user to start chatting:");
+        instruction.setStyle("-fx-font-size: 13px;");
+        
+        Button refreshButton = new Button("🔄 Refresh");
+        refreshButton.setOnAction(e -> {
+            onlineUsersListView.getItems().clear();
+            onlineUsersListView.getItems().add("Loading...");
+            serverConnection.sendMessage(Message.listOnlineUsersRequest());
+        });
+        
+        content.getChildren().addAll(instruction, refreshButton, onlineUsersListView);
+        
+        dialog.getDialogPane().setContent(content);
+        dialog.getDialogPane().setPrefWidth(300);
+        dialog.getDialogPane().setPrefHeight(400);
+
+        // Add buttons
+        ButtonType selectButton = new ButtonType("Chat", ButtonBar.ButtonData.OK_DONE);
+        ButtonType cancelButton = new ButtonType("Cancel", ButtonBar.ButtonData.CANCEL_CLOSE);
+        dialog.getDialogPane().getButtonTypes().addAll(selectButton, cancelButton);
+
+        // Handle double-click
+        onlineUsersListView.setOnMouseClicked(e -> {
+            if (e.getClickCount() == 2) {
+                String selectedUser = onlineUsersListView.getSelectionModel().getSelectedItem();
+                if (selectedUser != null && !selectedUser.startsWith("Loading") && !selectedUser.startsWith("No other")) {
+                    openChatWithUser(selectedUser);
+                    dialog.close();
+                }
+            }
+        });
+
+        // Handle select button
+        dialog.setResultConverter(button -> {
+            if (button == selectButton) {
+                String selected = onlineUsersListView.getSelectionModel().getSelectedItem();
+                if (selected != null && !selected.startsWith("Loading") && !selected.startsWith("No other")) {
+                    return selected;
+                }
+            }
+            return null;
+        });
+
+        dialog.showAndWait().ifPresent(selectedUser -> {
+            if (selectedUser != null && !selectedUser.isEmpty()) {
+                openChatWithUser(selectedUser);
+            }
+        });
+        
+        // Clear reference when dialog closes
+        onlineUsersListView = null;
+    }
+
+    /**
+     * Open chat with a specific user
+     */
+    private void openChatWithUser(String userName) {
+        // First, try to find existing conversation with this user
+        for (String conv : conversationListView.getItems()) {
+            if (conv.toLowerCase().contains(userName.toLowerCase())) {
+                // Select and open this conversation
+                conversationListView.getSelectionModel().select(conv);
+                openConversation(conv);
+                statusLabel.setText("Chatting with: " + userName);
+                return;
+            }
+        }
+        
+        // Conversation not found - need to create one or get user ID
+        // For now, we'll request the server to create/find a private conversation
+        createOrOpenPrivateConversation(userName);
+    }
+    
+    /**
+     * Create or open a private conversation with a user
+     */
+    private void createOrOpenPrivateConversation(String userName) {
+        // Find the user ID from cached online users
+        if (cachedOnlineUsers == null) {
+            showAlert("Error", "Please try again. User information not loaded.");
+            return;
+        }
+        
+        int targetUserId = -1;
+        for (int i = 0; i < cachedOnlineUsers.length(); i++) {
+            JSONObject user = cachedOnlineUsers.getJSONObject(i);
+            if (user.getString("username").equalsIgnoreCase(userName)) {
+                targetUserId = user.getInt("userId");
+                break;
+            }
+        }
+        
+        if (targetUserId == -1) {
+            showAlert("Error", "Could not find user: " + userName);
+            return;
+        }
+        
+        // Send request to server to create or get private conversation
+        Message createConvMsg = new Message(Message.CREATE_CONVERSATION);
+        createConvMsg.put("conversationType", "PRIVATE");
+        createConvMsg.put("targetUserId", targetUserId);
+        serverConnection.sendMessage(createConvMsg);
+        
+        statusLabel.setText("Creating conversation with " + userName + "...");
+        
+        // Wait for conversation list to update and then open it
+        new Thread(() -> {
+            try {
+                Thread.sleep(500);
+                Platform.runLater(() -> {
+                    // Refresh conversation list
+                    requestConversationList();
+                    
+                    // Wait a bit more for the list to update
+                    new Thread(() -> {
+                        try {
+                            Thread.sleep(300);
+                            Platform.runLater(() -> {
+                                // Try to open the conversation again
+                                for (String conv : conversationListView.getItems()) {
+                                    if (conv.toLowerCase().contains(userName.toLowerCase())) {
+                                        conversationListView.getSelectionModel().select(conv);
+                                        openConversation(conv);
+                                        statusLabel.setText("Chatting with: " + userName);
+                                        return;
+                                    }
+                                }
+                                statusLabel.setText("Ready");
+                            });
+                        } catch (InterruptedException e) {
+                            // Ignore
+                        }
+                    }).start();
+                });
+            } catch (InterruptedException e) {
+                // Ignore
+            }
+        }).start();
     }
 
     /**
@@ -371,11 +690,96 @@ public class ClientApp extends Application {
         conversationTitleLabel.setText(name);
         chatArea.clear();
         messageField.setDisable(false);
-        ((Button) messageField.getParent().getChildrenUnmodifiable().get(1)).setDisable(false);
+        
+        // Enable both send and attach buttons
+        HBox inputBox = (HBox) messageField.getParent();
+        inputBox.getChildren().forEach(node -> {
+            if (node instanceof Button) {
+                node.setDisable(false);
+            }
+        });
 
         // Load history
         Message loadHistoryMsg = Message.loadHistoryRequest(currentConversationId, 50, 0);
         serverConnection.sendMessage(loadHistoryMsg);
+    }
+    
+    /**
+     * Attach and send a file
+     */
+    private void attachAndSendFile() {
+        if (currentConversationId == null) {
+            showAlert("No Conversation", "Please select a conversation first.");
+            return;
+        }
+        
+        FileChooser fileChooser = new FileChooser();
+        fileChooser.setTitle("Select File to Send");
+        fileChooser.getExtensionFilters().addAll(
+            new FileChooser.ExtensionFilter("All Files", "*.*"),
+            new FileChooser.ExtensionFilter("Images", "*.png", "*.jpg", "*.jpeg", "*.gif"),
+            new FileChooser.ExtensionFilter("Documents", "*.pdf", "*.doc", "*.docx", "*.txt"),
+            new FileChooser.ExtensionFilter("Archives", "*.zip", "*.rar", "*.7z")
+        );
+        
+        File selectedFile = fileChooser.showOpenDialog(primaryStage);
+        if (selectedFile == null) {
+            return; // User cancelled
+        }
+        
+        // Check file size (max 50MB)
+        long maxSize = 50 * 1024 * 1024; // 50 MB
+        if (selectedFile.length() > maxSize) {
+            showAlert("File Too Large", 
+                String.format("File size is %.2f MB. Maximum allowed is 50 MB.", 
+                selectedFile.length() / (1024.0 * 1024.0)));
+            return;
+        }
+        
+        // Show progress dialog
+        Alert progressAlert = new Alert(Alert.AlertType.INFORMATION);
+        progressAlert.setTitle("Sending File");
+        progressAlert.setHeaderText("Uploading: " + selectedFile.getName());
+        progressAlert.setContentText("Please wait...");
+        progressAlert.show();
+        
+        // Send file in background thread
+        new Thread(() -> {
+            try {
+                byte[] fileData = Files.readAllBytes(selectedFile.toPath());
+                String base64Data = Base64.getEncoder().encodeToString(fileData);
+                
+                Message fileMsg = new Message(Message.SEND_FILE);
+                fileMsg.put("conversationId", currentConversationId);
+                fileMsg.put("filename", selectedFile.getName());
+                fileMsg.put("fileSize", selectedFile.length());
+                fileMsg.put("fileData", base64Data);
+                
+                serverConnection.sendMessage(fileMsg);
+                
+                Platform.runLater(() -> {
+                    progressAlert.close();
+                    chatArea.appendText(String.format("[FILE] You sent: %s (%.2f KB)\n", 
+                        selectedFile.getName(), selectedFile.length() / 1024.0));
+                });
+                
+            } catch (IOException e) {
+                Platform.runLater(() -> {
+                    progressAlert.close();
+                    showAlert("File Error", "Failed to read file: " + e.getMessage());
+                });
+            }
+        }).start();
+    }
+    
+    /**
+     * Show alert dialog
+     */
+    private void showAlert(String title, String content) {
+        Alert alert = new Alert(Alert.AlertType.WARNING);
+        alert.setTitle(title);
+        alert.setContentText(content);
+        alert.show();
     }
 
     /**
