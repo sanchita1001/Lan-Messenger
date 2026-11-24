@@ -12,6 +12,7 @@ import org.json.JSONObject;
 
 import java.io.IOException;
 import java.net.Socket;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -398,6 +399,54 @@ public class ClientHandler implements Runnable {
                 }
             } else {
                 sendError("Failed to create conversation");
+            }
+        } else if ("GROUP".equalsIgnoreCase(convType)) {
+            String groupName = message.getString("groupName");
+            JSONArray memberIdsArray = message.getData().optJSONArray("memberIds");
+            
+            if (groupName == null || groupName.trim().isEmpty()) {
+                sendError("Group name is required");
+                return;
+            }
+            
+            if (memberIdsArray == null || memberIdsArray.length() == 0) {
+                sendError("At least one member is required");
+                return;
+            }
+            
+            // Build member list including creator
+            List<Integer> memberIds = new ArrayList<>();
+            memberIds.add(authenticatedUserId); // Add creator
+            
+            for (int i = 0; i < memberIdsArray.length(); i++) {
+                int memberId = memberIdsArray.getInt(i);
+                if (memberId != authenticatedUserId) { // Avoid duplicates
+                    memberIds.add(memberId);
+                }
+            }
+            
+            // Create group conversation
+            int groupConvId = messageService.createGroupConversation(groupName, memberIds);
+            
+            if (groupConvId > 0) {
+                System.out.println("[ClientHandler] Group conversation created: " + groupConvId + 
+                    " with name '" + groupName + "' and " + memberIds.size() + " members");
+                
+                // Broadcast CONVERSATION_CREATED to ALL members
+                List<User> members = messageService.getConversationMembers(groupConvId);
+                
+                for (User member : members) {
+                    ClientHandler handler = userRegistry.getClientHandler(member.getUserId());
+                    if (handler != null) {
+                        Message response = new Message("CONVERSATION_CREATED");
+                        response.put("conversationId", groupConvId);
+                        response.put("conversationType", "GROUP");
+                        response.put("groupName", groupName);
+                        handler.sendMessage(response);
+                    }
+                }
+            } else {
+                sendError("Failed to create group conversation");
             }
         } else {
             sendError("Unsupported conversation type: " + convType);

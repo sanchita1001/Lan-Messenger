@@ -17,7 +17,9 @@ import org.json.JSONObject;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.util.ArrayList;
 import java.util.Base64;
+import java.util.List;
 
 /**
  * Simple JavaFX Client Application
@@ -428,6 +430,11 @@ public class ClientApp extends Application {
         newChatButton.setStyle("-fx-background-color: #27ae60; -fx-text-fill: white; -fx-font-size: 12px;");
         newChatButton.setMaxWidth(Double.MAX_VALUE);
         newChatButton.setOnAction(e -> showNewChatDialog());
+        
+        Button newGroupButton = new Button("👥 New Group");
+        newGroupButton.setStyle("-fx-background-color: #3498db; -fx-text-fill: white; -fx-font-size: 12px;");
+        newGroupButton.setMaxWidth(Double.MAX_VALUE);
+        newGroupButton.setOnAction(e -> showNewGroupDialog());
 
         conversationListView = new ListView<>();
         conversationListView.setStyle("-fx-background-color: #2c3e50; -fx-text-fill: white;");
@@ -440,7 +447,7 @@ public class ClientApp extends Application {
             }
         });
 
-        sidebar.getChildren().addAll(sidebarTitle, newChatButton, conversationListView);
+        sidebar.getChildren().addAll(sidebarTitle, newChatButton, newGroupButton, conversationListView);
         VBox.setVgrow(conversationListView, Priority.ALWAYS);
 
         // Center - chat area
@@ -611,6 +618,162 @@ public class ClientApp extends Application {
         
         // Clear reference when dialog closes
         onlineUsersListView = null;
+    }
+    
+    /**
+     * Show dialog to create a new group chat
+     */
+    private void showNewGroupDialog() {
+        Dialog<Boolean> dialog = new Dialog<>();
+        dialog.setTitle("Create Group Chat");
+        dialog.setHeaderText("Create a new group conversation");
+        
+        VBox content = new VBox(15);
+        content.setPadding(new Insets(15));
+        content.setPrefWidth(400);
+        
+        // Group name field
+        Label nameLabel = new Label("Group Name:");
+        nameLabel.setStyle("-fx-font-weight: bold;");
+        TextField groupNameField = new TextField();
+        groupNameField.setPromptText("Enter group name...");
+        
+        // Members selection
+        Label membersLabel = new Label("Select Members:");
+        membersLabel.setStyle("-fx-font-weight: bold;");
+        
+        ListView<javafx.scene.control.CheckBox> memberListView = new ListView<>();
+        memberListView.setPrefHeight(200);
+        
+        // Request online users
+        serverConnection.sendMessage(Message.listOnlineUsersRequest());
+        
+        // Wait and populate
+        new Thread(() -> {
+            try {
+                Thread.sleep(500);
+                Platform.runLater(() -> {
+                    if (cachedOnlineUsers != null && cachedOnlineUsers.length() > 0) {
+                        for (int i = 0; i < cachedOnlineUsers.length(); i++) {
+                            JSONObject user = cachedOnlineUsers.getJSONObject(i);
+                            String username = user.getString("username");
+                            int userId = user.getInt("userId");
+                            
+                            javafx.scene.control.CheckBox checkBox = new javafx.scene.control.CheckBox(username);
+                            checkBox.setUserData(userId);
+                            memberListView.getItems().add(checkBox);
+                        }
+                    } else {
+                        Label noUsers = new Label("No other users online");
+                        memberListView.setPlaceholder(noUsers);
+                    }
+                });
+            } catch (InterruptedException e) {
+                // Ignore
+            }
+        }).start();
+        
+        Button refreshButton = new Button("🔄 Refresh");
+        refreshButton.setOnAction(e -> {
+            memberListView.getItems().clear();
+            serverConnection.sendMessage(Message.listOnlineUsersRequest());
+            
+            new Thread(() -> {
+                try {
+                    Thread.sleep(500);
+                    Platform.runLater(() -> {
+                        if (cachedOnlineUsers != null) {
+                            for (int i = 0; i < cachedOnlineUsers.length(); i++) {
+                                JSONObject user = cachedOnlineUsers.getJSONObject(i);
+                                String username = user.getString("username");
+                                int userId = user.getInt("userId");
+                                
+                                javafx.scene.control.CheckBox checkBox = new javafx.scene.control.CheckBox(username);
+                                checkBox.setUserData(userId);
+                                memberListView.getItems().add(checkBox);
+                            }
+                        }
+                    });
+                } catch (InterruptedException ex) {
+                    // Ignore
+                }
+            }).start();
+        });
+        
+        content.getChildren().addAll(nameLabel, groupNameField, membersLabel, refreshButton, memberListView);
+        dialog.getDialogPane().setContent(content);
+        
+        // Add buttons
+        ButtonType createButton = new ButtonType("Create Group", ButtonBar.ButtonData.OK_DONE);
+        ButtonType cancelButton = new ButtonType("Cancel", ButtonBar.ButtonData.CANCEL_CLOSE);
+        dialog.getDialogPane().getButtonTypes().addAll(createButton, cancelButton);
+        
+        // Handle create button
+        dialog.setResultConverter(button -> {
+            if (button == createButton) {
+                return true;
+            }
+            return false;
+        });
+        
+        dialog.showAndWait().ifPresent(create -> {
+            if (create) {
+                String groupName = groupNameField.getText().trim();
+                
+                if (groupName.isEmpty()) {
+                    showAlert("Invalid Input", "Please enter a group name.");
+                    return;
+                }
+                
+                // Collect selected member IDs
+                List<Integer> selectedMemberIds = new ArrayList<>();
+                for (javafx.scene.control.CheckBox checkBox : memberListView.getItems()) {
+                    if (checkBox.isSelected()) {
+                        selectedMemberIds.add((Integer) checkBox.getUserData());
+                    }
+                }
+                
+                if (selectedMemberIds.isEmpty()) {
+                    showAlert("Invalid Selection", "Please select at least one member.");
+                    return;
+                }
+                
+                // Create group
+                createGroupConversation(groupName, selectedMemberIds);
+            }
+        });
+    }
+    
+    /**
+     * Create a group conversation
+     */
+    private void createGroupConversation(String groupName, List<Integer> memberIds) {
+        Message createGroupMsg = new Message(Message.CREATE_CONVERSATION);
+        createGroupMsg.put("conversationType", "GROUP");
+        createGroupMsg.put("groupName", groupName);
+        
+        // Convert List to JSONArray
+        JSONArray memberIdsArray = new JSONArray();
+        for (Integer memberId : memberIds) {
+            memberIdsArray.put(memberId);
+        }
+        createGroupMsg.put("memberIds", memberIdsArray);
+        
+        serverConnection.sendMessage(createGroupMsg);
+        statusLabel.setText("Creating group '" + groupName + "'...");
+        
+        // Wait for server response and refresh conversation list
+        new Thread(() -> {
+            try {
+                Thread.sleep(500);
+                Platform.runLater(() -> {
+                    requestConversationList();
+                    statusLabel.setText("Group created successfully!");
+                });
+            } catch (InterruptedException e) {
+                // Ignore
+            }
+        }).start();
     }
 
     /**
