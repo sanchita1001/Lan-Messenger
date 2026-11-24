@@ -59,13 +59,6 @@ public class MessageService {
     }
 
     /**
-     * Get recent messages for a conversation
-     */
-    public List<ChatMessage> getRecentMessages(int conversationId, int limit) {
-        return messageDAO.getRecentMessages(conversationId, limit);
-    }
-
-    /**
      * Get all conversations for a user
      */
     public List<Conversation> getUserConversations(int userId) {

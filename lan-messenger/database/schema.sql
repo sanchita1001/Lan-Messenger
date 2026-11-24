@@ -57,9 +57,7 @@ CREATE TABLE conversation_members (
     INDEX idx_user_conversations (user_id, conversation_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- ============================================================================
--- TABLE: messages
--- Stores all chat messages
+
 -- ============================================================================
 CREATE TABLE messages (
     message_id INT AUTO_INCREMENT PRIMARY KEY,
@@ -131,74 +129,7 @@ INSERT INTO messages (conversation_id, sender_id, message_text) VALUES
 (2, 2, 'Thanks Alice! Glad to be here.'),
 (2, 3, 'Hello team! 👋');
 
--- ============================================================================
--- USEFUL QUERIES FOR APPLICATION DEVELOPMENT
--- ============================================================================
 
--- Query 1: Check if username exists
--- SELECT COUNT(*) FROM users WHERE username = 'alice';
-
--- Query 2: Get user by username for login
--- SELECT user_id, username, password_hash FROM users WHERE username = 'alice';
-
--- Query 3: Get all conversations for a user
--- SELECT c.conversation_id, c.conversation_type, c.conversation_name, c.created_at
--- FROM conversations c
--- INNER JOIN conversation_members cm ON c.conversation_id = cm.conversation_id
--- WHERE cm.user_id = 1
--- ORDER BY c.created_at DESC;
-
--- Query 4: Get conversation members
--- SELECT u.user_id, u.username, u.last_seen
--- FROM users u
--- INNER JOIN conversation_members cm ON u.user_id = cm.user_id
--- WHERE cm.conversation_id = 1;
-
--- Query 5: Get recent messages for a conversation
--- SELECT m.message_id, m.sender_id, u.username as sender_name, m.message_text, m.sent_at
--- FROM messages m
--- INNER JOIN users u ON m.sender_id = u.user_id
--- WHERE m.conversation_id = 1
--- ORDER BY m.sent_at DESC
--- LIMIT 50;
-
--- Query 6: Check if user is member of conversation
--- SELECT COUNT(*) FROM conversation_members 
--- WHERE conversation_id = 1 AND user_id = 1;
-
--- Query 7: Search messages in a conversation
--- SELECT m.message_id, u.username, m.message_text, m.sent_at
--- FROM messages m
--- INNER JOIN users u ON m.sender_id = u.user_id
--- WHERE m.conversation_id = 1 
--- AND MATCH(m.message_text) AGAINST('search term' IN NATURAL LANGUAGE MODE)
--- ORDER BY m.sent_at DESC;
-
--- Query 8: Get online users (active in last 5 minutes)
--- SELECT user_id, username, last_seen
--- FROM users
--- WHERE last_seen >= NOW() - INTERVAL 5 MINUTE
--- ORDER BY last_seen DESC;
-
--- Query 9: Find or create private conversation between two users
--- SELECT c.conversation_id
--- FROM conversations c
--- WHERE c.conversation_type = 'PRIVATE'
--- AND c.conversation_id IN (
---     SELECT conversation_id FROM conversation_members WHERE user_id = 1
--- )
--- AND c.conversation_id IN (
---     SELECT conversation_id FROM conversation_members WHERE user_id = 2
--- )
--- AND (
---     SELECT COUNT(*) FROM conversation_members WHERE conversation_id = c.conversation_id
--- ) = 2;
-
--- ============================================================================
--- VERIFICATION QUERIES
--- ============================================================================
-
--- Show all tables
 SHOW TABLES;
 
 -- Show table structures
@@ -219,13 +150,3 @@ SELECT 'Messages', COUNT(*) FROM messages
 UNION ALL
 SELECT 'Files', COUNT(*) FROM files;
 
--- ============================================================================
--- CLEANUP (Use with caution - deletes all data!)
--- ============================================================================
-
--- To reset the database:
--- DROP TABLE IF EXISTS files;
--- DROP TABLE IF EXISTS messages;
--- DROP TABLE IF EXISTS conversation_members;
--- DROP TABLE IF EXISTS conversations;
--- DROP TABLE IF EXISTS users;

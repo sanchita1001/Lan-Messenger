@@ -385,33 +385,6 @@ public class ClientApp extends Application {
     }
     
     /**
-     * Save received file to disk (deprecated - now uses downloadFile)
-     */
-    private void saveReceivedFile(Message message) {
-        try {
-            String filename = message.getString("filename");
-            String base64Data = message.getString("fileData");
-            
-            FileChooser fileChooser = new FileChooser();
-            fileChooser.setTitle("Save File");
-            fileChooser.setInitialFileName(filename);
-            
-            File saveFile = fileChooser.showSaveDialog(primaryStage);
-            if (saveFile == null) {
-                return; // User cancelled
-            }
-            
-            byte[] fileData = Base64.getDecoder().decode(base64Data);
-            Files.write(saveFile.toPath(), fileData);
-            
-            showAlert("Success", "File saved successfully!");
-            
-        } catch (Exception e) {
-            showAlert("Save Error", "Failed to save file: " + e.getMessage());
-        }
-    }
-
-    /**
      * Show main chat screen
      */
     private void showChatScreen() {

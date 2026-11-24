@@ -92,13 +92,6 @@ public class FileService {
     }
 
     /**
-     * Get file metadata by message ID
-     */
-    public FileMetadata getFileMetadataByMessageId(int messageId) {
-        return fileDAO.getFileMetadataByMessageId(messageId);
-    }
-
-    /**
      * Read file contents
      */
     public byte[] readFile(String storagePath) {
@@ -139,14 +132,5 @@ public class FileService {
         }
         
         return sanitized;
-    }
-
-    /**
-     * Validate file extension
-     */
-    public boolean isValidFileExtension(String filename) {
-        // For now, allow all extensions
-        // Can be enhanced with allowlist from config
-        return filename != null && !filename.trim().isEmpty();
     }
 }

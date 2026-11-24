@@ -72,33 +72,4 @@ public class FileDAO {
         return null;
     }
 
-    /**
-     * Get file metadata by message ID
-     */
-    public FileMetadata getFileMetadataByMessageId(int messageId) {
-        String sql = "SELECT file_id, message_id, original_filename, storage_path, file_size, uploaded_at " +
-                    "FROM files WHERE message_id = ?";
-
-        try (Connection conn = DatabaseConnection.getConnection();
-             PreparedStatement stmt = conn.prepareStatement(sql)) {
-
-            stmt.setInt(1, messageId);
-            ResultSet rs = stmt.executeQuery();
-
-            if (rs.next()) {
-                return new FileMetadata(
-                        rs.getInt("file_id"),
-                        rs.getInt("message_id"),
-                        rs.getString("original_filename"),
-                        rs.getString("storage_path"),
-                        rs.getLong("file_size"),
-                        rs.getTimestamp("uploaded_at")
-                );
-            }
-        } catch (SQLException e) {
-            System.err.println("[FileDAO] Error getting file metadata by message: " + e.getMessage());
-        }
-
-        return null;
-    }
 }
